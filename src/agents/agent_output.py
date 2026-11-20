@@ -1,8 +1,8 @@
 import abc
 from dataclasses import dataclass
-from typing import Any, cast, get_args, get_origin
+from typing import Annotated, Any, cast, get_args, get_origin
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, RootModel, TypeAdapter
 from typing_extensions import TypedDict
 
 from .exceptions import (
@@ -191,7 +191,7 @@ class AgentOutputSchema(AgentOutputSchemaBase):
         return _type_to_str(self.output_type)
 
 
-def _is_subclass_of_base_model_or_dict(t: Any) -> bool:
+def _is_subclass_of_base_model_or_dict(t: Any, _seen: set[type] | None = None) -> bool:
     # If it's a generic alias, 'origin' will be the actual type, e.g. 'list'
     origin = get_origin(t)
     if origin is not None:
@@ -200,7 +200,34 @@ def _is_subclass_of_base_model_or_dict(t: Any) -> bool:
     if not isinstance(t, type):
         return False
 
+    if issubclass(t, RootModel):
+        # A RootModel produces the JSON schema of its `root` field, which is not necessarily
+        # an object. Only object-backed RootModels (e.g. RootModel[SomeBaseModel] or
+        # RootModel[dict[str, Any]]) can satisfy the structured-outputs requirement that the
+        # root of the JSON schema be an object; every other RootModel needs the wrapper dict.
+        if _seen is None:
+            _seen = set()
+        if t in _seen:
+            return False
+        _seen.add(t)
+        root_field = t.model_fields.get("root")
+        if root_field is None or root_field.annotation is None:
+            return False
+        return _is_subclass_of_base_model_or_dict(
+            _unwrap_annotated(root_field.annotation), _seen=_seen
+        )
+
     return issubclass(t, BaseModel | dict)
+
+
+def _unwrap_annotated(t: Any) -> Any:
+    # Peel `Annotated[...]` wrappers so the underlying type can be inspected.
+    while get_origin(t) is Annotated:
+        args = get_args(t)
+        if len(args) < 2:
+            break
+        t = args[0]
+    return t
 
 
 def _type_to_str(t: Any) -> str:

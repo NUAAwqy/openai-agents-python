@@ -1,8 +1,8 @@
 import json
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, RootModel
 from typing_extensions import TypedDict
 
 from agents import (
@@ -28,6 +28,16 @@ def test_plain_text_output():
 
 class Foo(BaseModel):
     bar: str
+
+
+class ClickEvent(BaseModel):
+    kind: Literal["click"]
+    x: int
+
+
+class ViewEvent(BaseModel):
+    kind: Literal["view"]
+    url: str
 
 
 def test_structured_output_pydantic():
@@ -75,6 +85,105 @@ def test_structured_output_list():
     json_str = json.dumps({_WRAPPER_DICT_KEY: ["foo", "bar"]})
     validated = output_schema.validate_json(json_str)
     assert validated == ["foo", "bar"]
+
+
+def test_structured_output_root_model_list_alias_is_wrapped():
+    output_schema = AgentOutputSchema(output_type=RootModel[list[str]])
+
+    assert output_schema.output_type == RootModel[list[str]]
+    assert output_schema._is_wrapped, "List-backed RootModels should be wrapped"
+
+    schema = output_schema.json_schema()
+    assert schema["type"] == "object"
+    assert _WRAPPER_DICT_KEY in schema["properties"]
+
+    validated = output_schema.validate_json(json.dumps({_WRAPPER_DICT_KEY: ["foo", "bar"]}))
+    assert isinstance(validated, RootModel)
+    assert validated.root == ["foo", "bar"]
+
+
+def test_structured_output_root_model_subclass_scalar_is_wrapped():
+    class Score(RootModel[int]):
+        pass
+
+    output_schema = AgentOutputSchema(output_type=Score)
+
+    assert output_schema._is_wrapped, "Scalar-backed RootModels should be wrapped"
+
+    schema = output_schema.json_schema()
+    assert schema["type"] == "object"
+    assert _WRAPPER_DICT_KEY in schema["properties"]
+
+    validated = output_schema.validate_json(json.dumps({_WRAPPER_DICT_KEY: 5}))
+    assert isinstance(validated, Score)
+    assert validated.root == 5
+
+
+def test_structured_output_root_model_union_is_wrapped():
+    output_schema = AgentOutputSchema(output_type=RootModel[str | int])
+
+    assert output_schema._is_wrapped, "Union-backed RootModels should be wrapped"
+    assert output_schema.json_schema()["type"] == "object"
+
+    validated = output_schema.validate_json(json.dumps({_WRAPPER_DICT_KEY: "foo"}))
+    assert isinstance(validated, RootModel)
+    assert validated.root == "foo"
+
+
+def test_structured_output_root_model_discriminated_union_is_wrapped():
+    class Event(RootModel[Annotated[ClickEvent | ViewEvent, Field(discriminator="kind")]]):
+        pass
+
+    output_schema = AgentOutputSchema(output_type=Event)
+
+    assert output_schema._is_wrapped, "Discriminated-union RootModels should be wrapped"
+
+    schema = output_schema.json_schema()
+    assert schema["type"] == "object"
+    assert _WRAPPER_DICT_KEY in schema["properties"]
+
+    validated = output_schema.validate_json(
+        json.dumps({_WRAPPER_DICT_KEY: {"kind": "click", "x": 1}})
+    )
+    assert isinstance(validated, Event)
+    assert validated.root == ClickEvent(kind="click", x=1)
+
+
+def test_structured_output_root_model_nested_alias_is_wrapped():
+    output_schema = AgentOutputSchema(output_type=RootModel[RootModel[int]])
+
+    assert output_schema._is_wrapped, "RootModels backed by another RootModel should be wrapped"
+    assert output_schema.json_schema()["type"] == "object"
+
+    validated = output_schema.validate_json(json.dumps({_WRAPPER_DICT_KEY: 7}))
+    assert isinstance(validated, RootModel)
+    assert validated.root.root == 7
+
+
+def test_structured_output_object_backed_root_model_is_not_wrapped():
+    class ItemRoot(RootModel[Foo]):
+        pass
+
+    output_schema = AgentOutputSchema(output_type=ItemRoot)
+
+    assert not output_schema._is_wrapped, "Object-backed RootModels should not be wrapped"
+    assert output_schema.json_schema()["type"] == "object"
+
+    validated = output_schema.validate_json(json.dumps({"bar": "baz"}))
+    assert isinstance(validated, ItemRoot)
+    assert validated.root == Foo(bar="baz")
+
+
+def test_structured_output_dict_backed_root_model_is_not_wrapped():
+    output_schema = AgentOutputSchema(
+        output_type=RootModel[dict[str, int]], strict_json_schema=False
+    )
+
+    assert not output_schema._is_wrapped, "Dict-backed RootModels should not be wrapped"
+
+    validated = output_schema.validate_json(json.dumps({"foo": 1}))
+    assert isinstance(validated, RootModel)
+    assert validated.root == {"foo": 1}
 
 
 def test_structured_output_literal_name_handles_literal_values():
