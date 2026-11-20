@@ -576,6 +576,46 @@ class TestSkillsInstructions:
                 id="wrapped_plain_scalar",
             ),
             pytest.param(
+                "description:\n  Use for GitHub issue triage.\n  Handles bug reports",
+                "Use for GitHub issue triage. Handles bug reports",
+                id="plain_scalar_starts_on_next_line",
+            ),
+            pytest.param(
+                "description:\n\n  Use for GitHub issue triage.",
+                "Use for GitHub issue triage.",
+                id="plain_scalar_after_blank_line",
+            ),
+            pytest.param(
+                'description:\n  "quoted content"',
+                "quoted content",
+                id="quoted_scalar_starts_on_next_line",
+            ),
+            pytest.param(
+                "description:\n  # maintainer note\n  Use for GitHub issue triage.",
+                "Use for GitHub issue triage.",
+                id="comment_line_before_plain_value",
+            ),
+            pytest.param(
+                "description:\n  # maintainer note",
+                "",
+                id="comment_only_continuation_keeps_field_empty",
+            ),
+            pytest.param(
+                "description:\n  \n",
+                "",
+                id="whitespace_only_continuation_keeps_field_empty",
+            ),
+            pytest.param(
+                "description:\n  triggers: /triage\n  scope: bugs",
+                "",
+                id="nested_mapping_on_next_line_keeps_field_empty",
+            ),
+            pytest.param(
+                "description:\n  - /triage\n  - /bug",
+                "",
+                id="sequence_on_next_line_keeps_field_empty",
+            ),
+            pytest.param(
                 "description: >\n  Use for GitHub issue triage.\n\n  Not for PR review.",
                 "Use for GitHub issue triage.\nNot for PR review.",
                 id="folded_block_scalar_with_blank_line",

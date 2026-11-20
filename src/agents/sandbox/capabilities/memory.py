@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal
 
 from pydantic import Field
 
@@ -66,8 +66,11 @@ class Memory(Capability):
         finally:
             handle.close()
 
+        summary_text = (
+            payload if isinstance(payload, str) else payload.decode("utf-8", errors="replace")
+        )
         memory_summary = truncate_text(
-            cast(bytes, payload).decode("utf-8", errors="replace").strip(),
+            summary_text.strip(),
             TruncationPolicy.tokens(_MEMORY_SUMMARY_MAX_TOKENS),
         )
         if not memory_summary:

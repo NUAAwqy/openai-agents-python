@@ -4,10 +4,12 @@ import asyncio
 import io
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast, get_type_hints
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from openai.types.responses import ResponseCustomToolCall, ResponseFunctionToolCall
@@ -780,6 +782,38 @@ async def test_memory_capability_returns_none_without_memory_summary() -> None:
             )
 
             assert await capability.instructions(session.state.manifest) is None
+    finally:
+        await client.delete(session)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "make_handle",
+    [
+        pytest.param(lambda: io.BytesIO(b"fixture memory summary"), id="byte_handle"),
+        pytest.param(lambda: io.StringIO("fixture memory summary"), id="text_handle"),
+    ],
+)
+async def test_memory_capability_instructions_accepts_text_and_byte_handles(
+    make_handle: Callable[[], io.IOBase],
+) -> None:
+    """`BaseSandboxSession.read` returns a readable file-like object, which may be text or
+    binary mode. Both should render the same memory instructions."""
+
+    client = FilesystemTestSandboxClient()
+    session = await client.create(manifest=Manifest())
+    capability = Memory(generate=None)
+
+    try:
+        async with session:
+            capability.bind(session)
+            handle = make_handle()
+            with patch.object(type(session), "read", new=AsyncMock(return_value=handle)):
+                instructions = await capability.instructions(session.state.manifest)
+
+            assert handle.closed
+            assert instructions is not None
+            assert "fixture memory summary" in instructions
     finally:
         await client.delete(session)
 
